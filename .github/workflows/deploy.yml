@@ -22,7 +22,7 @@ concurrency:
 env:
   APP_DIR: /srv/edge-proxy
   # URLs que precisam responder com TLS válido depois de uma troca (separadas por espaço)
-  CHECK_URLS: https://api.staging.painelpolitico.com.br/
+  CHECK_URLS: https://api.staging.painelpolitico.com.br/ http://127.0.0.1:8080/up
   RADAR_PROXY_COMPOSE: /srv/radar-backend-staging/docker-compose.proxy.yml
 
 jobs:
@@ -32,7 +32,8 @@ jobs:
       - uses: actions/checkout@v5
       - name: Validar compose e Caddyfile
         run: |
-          docker network create radar_gateway   # externa na VPS; aqui só para o compose aceitar
+          docker network create radar_gateway     # externas na VPS; aqui só para o compose aceitar
+          docker network create domecap_domecap
           docker compose config -q
           docker compose run --rm --no-deps --entrypoint caddy caddy validate --config /etc/caddy/Caddyfile
           docker compose down -v
@@ -119,9 +120,23 @@ jobs:
           # (bash -s <<EOF). Foi esse bug que fez os cutovers anteriores "passarem" sem fazer nada.
           docker compose run -T --rm --no-deps --entrypoint caddy caddy validate --config /etc/caddy/Caddyfile </dev/null
 
+          # Portas que este compose publica e que estão em uso por OUTRO contêiner. Se houver,
+          # NÃO recriar o edge_caddy (o novo não subiria e derrubaria todos os sites): só reload.
+          port_conflicts() {
+            for p in $(docker compose config --format json </dev/null | python3 -c 'import json,sys; print(" ".join(sorted({str(pt["published"]) for pt in json.load(sys.stdin)["services"]["caddy"].get("ports", [])})))'); do
+              docker ps --format '{{.Names}} {{.Ports}}' | grep -v '^edge_caddy ' | grep -E "(0\.0\.0\.0|\[::\]):$p->" | awk -v p="$p" '{print p" (usada por "$1")"}'
+            done
+          }
+
           if docker ps --format '{{.Names}}' | grep -qx edge_caddy; then
-            echo "==> edge_caddy no ar: aplicando sem queda"
-            docker compose up -d </dev/null
+            conflicts=$(port_conflicts)
+            if [ -n "$conflicts" ]; then
+              echo "::warning::porta(s) ocupada(s) por outro projeto: $conflicts — edge_caddy NÃO recriado; só recarregando a config."
+              echo "   (libere a porta no projeto dono e rode este workflow de novo para publicá-la)"
+            else
+              echo "==> edge_caddy no ar: aplicando (recria só se compose mudou)"
+              docker compose up -d </dev/null
+            fi
             docker compose exec -T caddy caddy reload --config /etc/caddy/Caddyfile </dev/null
             check_urls || { echo "::warning::alguma URL de CHECK_URLS não respondeu como esperado"; }
             exit 0

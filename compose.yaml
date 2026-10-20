@@ -18,6 +18,7 @@ services:
       - "80:80"
       - "443:443"
       - "443:443/udp"   # HTTP/3
+      - "8080:8080"     # domecap (conf/sites/domecap.caddy)
     volumes:
       # pasta inteira (não arquivo): o rsync troca o inode dos arquivos e um bind
       # mount de arquivo único continuaria vendo a versão antiga
@@ -27,6 +28,7 @@ services:
     networks:
       - edge
       - radar_gateway          # alcança staging_nginx sem mudar o projeto radar
+      - domecap                # alcança domecap_nginx
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:2019/config/"]
       interval: 30s
@@ -41,6 +43,9 @@ networks:
     name: edge                 # rede compartilhada criada por este projeto
   radar_gateway:
     external: true             # criada pelo projeto radar
+  domecap:
+    name: domecap_domecap
+    external: true             # criada pelo compose do domecap
 
 volumes:
   caddy-data:

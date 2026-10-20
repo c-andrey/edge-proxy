@@ -1,0 +1,14 @@
+# Domecap (staging) — http://187.77.254.161:8080 → domecap_nginx:80 (rede domecap_domecap).
+# Antes o domecap_nginx publicava 0.0.0.0:8080 direto; agora só o edge-proxy fala com a internet.
+# O Host chega intacto (187.77.254.161:8080), igual ao APP_URL/SANCTUM_STATEFUL_DOMAINS do Laravel.
+# Só HTTP (é por IP). Com domínio próprio: trocar por "app.dominio.com { ... }" e ganhar HTTPS.
+http://:8080 {
+	reverse_proxy domecap_nginx:80 {
+		transport http {
+			dial_timeout 3s
+		}
+		# segura durante o deploy do domecap (nginx sendo recriado)
+		lb_try_duration 6s
+		lb_try_interval 500ms
+	}
+}

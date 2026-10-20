@@ -11,11 +11,24 @@ quebrava porque a porta 80 ficava ocupada (o cert do radar staging venceu em 23/
 | `conf/sites/radar-staging.caddy` | `api.staging.painelpolitico.com.br` → `staging_nginx:80` |
 | `conf/sites/gamedle.caddy.off` | Gamedle (renomear para `.caddy` quando o DNS existir) |
 | `conf/sites/ip-gamedle.caddy` | acesso provisório `http://187.77.254.161/gamedle` (noindex) |
+| `conf/sites/domecap.caddy` | `http://187.77.254.161:8080` → `domecap_nginx:80` (rede `domecap_domecap`) |
 | `.github/workflows/deploy.yml` | valida no CI, sincroniza para `/srv/edge-proxy`, recarrega o Caddy |
 
 ## Fluxo normal (sempre pelo repo — não editar na VPS)
 1. Editar/adicionar `conf/sites/<projeto>.caddy` e dar push na `main`.
 2. O Actions valida a config, faz rsync para `/srv/edge-proxy` e roda `docker compose up -d` + `caddy reload` (sem queda).
+
+## Projetos por porta (sem domínio)
+Cada porta pública é publicada **aqui** (`compose.yaml` → `ports`) e roteada por um `conf/sites/<projeto>.caddy`
+com `http://:PORTA { reverse_proxy <conteiner>:<porta-interna> }`. O projeto para de publicar a porta no
+próprio compose (fica só em `127.0.0.1`, para debug). O Caddy entra na rede Docker do projeto (`networks`).
+
+**Trava de porta:** se uma porta deste compose ainda estiver em uso por outro contêiner, o deploy **não recria**
+o `edge_caddy` (ele não subiria e derrubaria todos os sites) — só recarrega a config e avisa. Migração de um
+projeto por porta, portanto:
+1. push aqui (rota + porta + rede) → deploy avisa "porta ocupada", nada cai;
+2. deploy do projeto liberando a porta (fica fora do ar até o passo 3);
+3. rodar este workflow de novo (ou `docker compose up -d` em `/srv/edge-proxy`) → o Caddy publica a porta.
 
 ## Adicionar um projeto
 1. No projeto: ligar o serviço web à rede externa `edge` com um alias (ex.: `aliases: [meuapp]`).
