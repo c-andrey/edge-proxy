@@ -78,7 +78,7 @@ jobs:
           VPS_PORT: ${{ secrets.VPS_PORT }}
         run: |
           ssh -p "${VPS_PORT:-22}" "$VPS_USER@$VPS_HOST" "mkdir -p '$APP_DIR'"
-          rsync -az --delete \
+          rsync -az --delete --no-owner --no-group \
             -e "ssh -p ${VPS_PORT:-22} -o StrictHostKeyChecking=accept-new" \
             --exclude '.git' --exclude '.github' \
             ./ "$VPS_USER@$VPS_HOST:$APP_DIR/"
