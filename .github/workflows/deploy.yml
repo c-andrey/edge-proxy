@@ -1,0 +1,148 @@
+name: Deploy edge-proxy
+
+# push na main → valida → rsync p/ /srv/edge-proxy → up -d + caddy reload (sem queda).
+# Run workflow com cutover=true → migração única a partir do radar_proxy, com rollback automático.
+# Secrets: VPS_HOST, VPS_USER, VPS_SSH_KEY, VPS_PORT (opcional). Environment: production.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      cutover:
+        description: "Migrar do radar_proxy (derruba radar-proxy e sobe o Caddy; rollback automático se falhar)"
+        type: boolean
+        default: false
+
+concurrency:
+  group: deploy-edge-proxy
+  cancel-in-progress: false
+
+env:
+  APP_DIR: /srv/edge-proxy
+  # URLs que precisam responder com TLS válido depois de uma troca (separadas por espaço)
+  CHECK_URLS: https://api.staging.painelpolitico.com.br/
+  RADAR_PROXY_COMPOSE: /srv/radar-backend-staging/docker-compose.proxy.yml
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Validar compose e Caddyfile
+        run: |
+          docker network create radar_gateway   # externa na VPS; aqui só para o compose aceitar
+          docker compose config -q
+          docker compose run --rm --no-deps --entrypoint caddy caddy validate --config /etc/caddy/Caddyfile
+          docker compose down -v
+
+  deploy:
+    needs: validate
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Configure SSH
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_PORT: ${{ secrets.VPS_PORT }}
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "${{ secrets.VPS_SSH_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -p "${VPS_PORT:-22}" -H "$VPS_HOST" >> ~/.ssh/known_hosts
+
+      - name: Testar acesso SSH
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_PORT: ${{ secrets.VPS_PORT }}
+        run: |
+          [ -n "$VPS_HOST" ] && [ -n "$VPS_USER" ] || { echo "::error::secrets VPS_HOST/VPS_USER vazios"; exit 1; }
+          ssh-keygen -y -f ~/.ssh/id_ed25519 >/dev/null 2>&1 \
+            || { echo "::error::VPS_SSH_KEY não é uma chave privada válida (cole o arquivo inteiro, com as linhas BEGIN/END e quebra de linha final)"; exit 1; }
+          echo "fingerprint da chave usada: $(ssh-keygen -lf <(ssh-keygen -y -f ~/.ssh/id_ed25519) | awk '{print $2}')"
+          if ! ssh -p "${VPS_PORT:-22}" -o BatchMode=yes -o ConnectTimeout=15 "$VPS_USER@$VPS_HOST" true; then
+            echo "::error::SSH recusado para $VPS_USER@$VPS_HOST — a chave pública correspondente (fingerprint acima) precisa estar em ~$VPS_USER/.ssh/authorized_keys na VPS"
+            exit 1
+          fi
+          echo "SSH ok"
+
+      - name: Sync da config
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_PORT: ${{ secrets.VPS_PORT }}
+        run: |
+          ssh -p "${VPS_PORT:-22}" "$VPS_USER@$VPS_HOST" "mkdir -p '$APP_DIR'"
+          rsync -az --delete \
+            -e "ssh -p ${VPS_PORT:-22} -o StrictHostKeyChecking=accept-new" \
+            --exclude '.git' --exclude '.github' \
+            ./ "$VPS_USER@$VPS_HOST:$APP_DIR/"
+
+      - name: Aplicar
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_PORT: ${{ secrets.VPS_PORT }}
+          CUTOVER: ${{ inputs.cutover || false }}
+        run: |
+          ssh -p "${VPS_PORT:-22}" "$VPS_USER@$VPS_HOST" \
+            "APP_DIR='$APP_DIR' CUTOVER='$CUTOVER' CHECK_URLS='$CHECK_URLS' RADAR_PROXY_COMPOSE='$RADAR_PROXY_COMPOSE' bash -s" <<'EOF'
+          set -euo pipefail
+          cd "$APP_DIR"
+
+          check_urls() {   # TLS válido (sem -k) e resposta HTTP < 500 em todas as URLs
+            for i in $(seq 1 24); do
+              ok=1
+              for u in $CHECK_URLS; do
+                code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "$u" || true)
+                echo "  [$i] $u → $code"
+                case "$code" in 2*|3*|4*) ;; *) ok=0 ;; esac
+              done
+              [ "$ok" = 1 ] && return 0
+              sleep 5
+            done
+            return 1
+          }
+
+          echo "==> validando config"
+          docker compose pull -q
+          docker compose run --rm --no-deps --entrypoint caddy caddy validate --config /etc/caddy/Caddyfile
+
+          if docker ps --format '{{.Names}}' | grep -qx edge_caddy; then
+            echo "==> edge_caddy no ar: aplicando sem queda"
+            docker compose up -d
+            docker compose exec -T caddy caddy reload --config /etc/caddy/Caddyfile
+            check_urls || { echo "::warning::alguma URL de CHECK_URLS não respondeu como esperado"; }
+            exit 0
+          fi
+
+          if docker ps --format '{{.Names}}' | grep -qx radar_proxy; then
+            if [ "$CUTOVER" != "true" ]; then
+              echo "::warning::radar_proxy ainda ocupa 80/443. Arquivos sincronizados; rode este workflow manualmente com cutover=true para migrar."
+              exit 0
+            fi
+            echo "==> CUTOVER: derrubando radar-proxy e subindo o Caddy"
+            docker compose -f "$RADAR_PROXY_COMPOSE" down
+            docker compose up -d
+            echo "==> aguardando certificados e respostas válidas (até 120 s)"
+            if check_urls; then
+              echo "==> cutover OK"
+              docker compose ps
+              exit 0
+            fi
+            echo "::error::cutover falhou — ROLLBACK para o radar_proxy"
+            docker compose logs --tail 80 caddy || true
+            docker compose down
+            docker compose -f "$RADAR_PROXY_COMPOSE" up -d
+            exit 1
+          fi
+
+          echo "==> nenhum proxy no ar: subindo o Caddy"
+          docker compose up -d
+          check_urls || echo "::warning::alguma URL de CHECK_URLS não respondeu como esperado"
+          EOF

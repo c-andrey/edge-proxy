@@ -1,28 +1,36 @@
 # edge-proxy
 
 Proxy de borda compartilhado da VPS: **único dono das portas 80/443**, Caddy com TLS automático.
-Substitui o `radar_proxy` (nginx do repo radar-backend) e o certbot standalone.
+Substitui o `radar_proxy` (nginx do repo radar-backend) e o certbot standalone, cuja renovação
+quebrava porque a porta 80 ficava ocupada (o cert do radar staging venceu em 23/09/2026 por isso).
 
 | Arquivo | Papel |
 |---|---|
 | `compose.yaml` | contêiner `edge_caddy`, redes `edge` (criada aqui) e `radar_gateway` (externa), volume de certificados |
-| `Caddyfile` | opções globais + `import sites/*.caddy` |
-| `sites/radar-staging.caddy` | `api.staging.painelpolitico.com.br` → `staging_nginx:80` |
-| `sites/gamedle.caddy.off` | Gamedle (ativar quando o DNS existir) |
+| `conf/Caddyfile` | opções globais + `import sites/*.caddy` |
+| `conf/sites/radar-staging.caddy` | `api.staging.painelpolitico.com.br` → `staging_nginx:80` |
+| `conf/sites/gamedle.caddy.off` | Gamedle (renomear para `.caddy` quando o DNS existir) |
+| `.github/workflows/deploy.yml` | valida no CI, sincroniza para `/srv/edge-proxy`, recarrega o Caddy |
+
+## Fluxo normal (sempre pelo repo — não editar na VPS)
+1. Editar/adicionar `conf/sites/<projeto>.caddy` e dar push na `main`.
+2. O Actions valida a config, faz rsync para `/srv/edge-proxy` e roda `docker compose up -d` + `caddy reload` (sem queda).
 
 ## Adicionar um projeto
 1. No projeto: ligar o serviço web à rede externa `edge` com um alias (ex.: `aliases: [meuapp]`).
-2. Aqui: criar `sites/meuapp.caddy` com `dominio.com { reverse_proxy meuapp:PORTA }`.
-3. `docker compose exec caddy caddy validate --config /etc/caddy/Caddyfile && docker compose exec caddy caddy reload --config /etc/caddy/Caddyfile`
+2. Aqui: `conf/sites/meuapp.caddy` com `dominio.com { reverse_proxy meuapp:PORTA }` → push.
 
-## Migração a partir do radar_proxy (feita uma vez)
-```bash
-cd /srv/edge-proxy
-docker compose pull && docker compose run --rm --no-deps --entrypoint caddy caddy validate --config /etc/caddy/Caddyfile
-docker compose -p radar-proxy -f /srv/radar-backend-staging/docker-compose.proxy.yml down   # libera 80/443
-docker compose up -d && docker compose logs -f caddy      # aguardar "certificate obtained successfully"
-curl -sI https://api.staging.painelpolitico.com.br | head -1
-```
-**Rollback** (segundos): `docker compose down && docker compose -p radar-proxy -f /srv/radar-backend-staging/docker-compose.proxy.yml up -d`
+## Migração inicial a partir do radar_proxy (uma vez)
+Actions → **Deploy edge-proxy** → *Run workflow* com `cutover = true`. O workflow:
+1. valida a config e baixa a imagem (sem afetar nada);
+2. derruba a stack `radar-proxy` (libera 80/443) e sobe o Caddy;
+3. espera até 120 s por HTTPS **válido** (sem `-k`) em `CHECK_URLS`;
+4. se falhar, **rollback automático**: derruba o Caddy e sobe o `radar_proxy` de novo.
 
-⚠️ Não use `docker compose down -v` (apaga os certificados; reemitir em massa pode bater rate limit do Let's Encrypt).
+Enquanto o `radar_proxy` ocupar as portas, pushes normais só sincronizam os arquivos (aviso no log).
+
+## Secrets (mesmos dos outros repos da VPS)
+`VPS_HOST`, `VPS_USER`, `VPS_SSH_KEY`, `VPS_PORT` (opcional) + environment `production`.
+
+⚠️ Nunca `docker compose down -v`: apaga os certificados (reemitir em massa pode bater rate limit do Let's Encrypt).
+Depois da migração, o `certbot.timer` do host pode ser desativado (`systemctl disable --now certbot.timer`).

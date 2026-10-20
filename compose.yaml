@@ -1,10 +1,11 @@
 # edge-proxy — proxy de borda compartilhado da VPS (dono único das portas 80/443).
 # Caddy com TLS automático (Let's Encrypt/ZeroSSL), sem certbot.
 # Cada projeto entra na rede "edge" (ou numa rede própria listada abaixo) e ganha
-# um arquivo em sites/*.caddy. Projetos não dependem uns dos outros.
+# um arquivo em conf/sites/*.caddy. Projetos não dependem uns dos outros.
+# Deploy: GitHub Actions (.github/workflows/deploy.yml) — não editar direto na VPS.
 #
 #   docker compose up -d
-#   docker compose exec caddy caddy reload --config /etc/caddy/Caddyfile   # após editar sites/
+#   docker compose exec caddy caddy reload --config /etc/caddy/Caddyfile   # após editar conf/sites/
 #   docker compose logs -f caddy
 name: edge-proxy
 
@@ -18,8 +19,9 @@ services:
       - "443:443"
       - "443:443/udp"   # HTTP/3
     volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - ./sites:/etc/caddy/sites:ro
+      # pasta inteira (não arquivo): o rsync troca o inode dos arquivos e um bind
+      # mount de arquivo único continuaria vendo a versão antiga
+      - ./conf:/etc/caddy:ro
       - caddy-data:/data       # certificados e contas ACME — NÃO apagar
       - caddy-config:/config
     networks:
