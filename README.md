@@ -10,6 +10,7 @@ quebrava porque a porta 80 ficava ocupada (o cert do radar staging venceu em 23/
 | `conf/Caddyfile` | opções globais + `import sites/*.caddy` |
 | `conf/sites/radar-staging.caddy` | `api.staging.painelpolitico.com.br` → `staging_nginx:80` |
 | `conf/sites/gamedle.caddy.off` | Gamedle (renomear para `.caddy` quando o DNS existir) |
+| `conf/sites/ip-gamedle.caddy` | acesso provisório `http://187.77.254.161/gamedle` (noindex) |
 | `.github/workflows/deploy.yml` | valida no CI, sincroniza para `/srv/edge-proxy`, recarrega o Caddy |
 
 ## Fluxo normal (sempre pelo repo — não editar na VPS)
