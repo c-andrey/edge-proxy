@@ -1,0 +1,18 @@
+# Radar — staging. Substitui o radar_proxy (nginx) do repo radar-backend.
+# Equivalente ao antigo docker/nginx/proxy.conf: redirect 80→443 (automático no Caddy),
+# TLS 1.2/1.3, headers de proxy, timeout de conexão 3s e novas tentativas em falha de conexão.
+api.staging.painelpolitico.com.br {
+	encode zstd gzip
+
+	reverse_proxy staging_nginx:80 {
+		header_up X-Real-IP {remote_host}
+		# X-Forwarded-For / -Proto / -Host são enviados pelo Caddy automaticamente
+		transport http {
+			dial_timeout 3s
+		}
+		# Refaz a tentativa por até 6s quando a CONEXÃO falha (ex.: staging_nginx reiniciando
+		# no deploy). Diferença p/ o nginx antigo: o Caddy não repete após receber 502/503/504.
+		lb_try_duration 6s
+		lb_try_interval 500ms
+	}
+}

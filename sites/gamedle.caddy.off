@@ -1,0 +1,21 @@
+# Gamedle BR. Renomeie para gamedle.caddy (e dê reload) SÓ DEPOIS que o DNS
+# de gamedle.com.br e www apontar para a VPS — senão o Caddy fica tentando
+# emitir certificado sem sucesso.
+# O app entra na rede "edge" pelo compose.proxy.yaml do repo gamedle (alias "gamedle").
+www.gamedle.com.br {
+	redir https://gamedle.com.br{uri} permanent
+}
+
+gamedle.com.br {
+	encode zstd gzip
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		-Server
+	}
+	reverse_proxy gamedle:3100 {
+		transport http {
+			dial_timeout 3s
+		}
+		lb_try_duration 5s
+	}
+}

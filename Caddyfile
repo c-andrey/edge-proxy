@@ -1,0 +1,8 @@
+# Opções globais. Para receber avisos do Let's Encrypt, adicione: email voce@exemplo.com
+{
+	# admin só dentro do contêiner (usado pelo healthcheck e pelo `caddy reload`)
+	admin 127.0.0.1:2019
+}
+
+# Um arquivo por projeto. Arquivos *.caddy.off ficam desligados.
+import sites/*.caddy

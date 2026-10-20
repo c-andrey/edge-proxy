@@ -1,0 +1,45 @@
+# edge-proxy — proxy de borda compartilhado da VPS (dono único das portas 80/443).
+# Caddy com TLS automático (Let's Encrypt/ZeroSSL), sem certbot.
+# Cada projeto entra na rede "edge" (ou numa rede própria listada abaixo) e ganha
+# um arquivo em sites/*.caddy. Projetos não dependem uns dos outros.
+#
+#   docker compose up -d
+#   docker compose exec caddy caddy reload --config /etc/caddy/Caddyfile   # após editar sites/
+#   docker compose logs -f caddy
+name: edge-proxy
+
+services:
+  caddy:
+    image: caddy:2.10-alpine
+    container_name: edge_caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"   # HTTP/3
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./sites:/etc/caddy/sites:ro
+      - caddy-data:/data       # certificados e contas ACME — NÃO apagar
+      - caddy-config:/config
+    networks:
+      - edge
+      - radar_gateway          # alcança staging_nginx sem mudar o projeto radar
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:2019/config/"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
+networks:
+  edge:
+    name: edge                 # rede compartilhada criada por este projeto
+  radar_gateway:
+    external: true             # criada pelo projeto radar
+
+volumes:
+  caddy-data:
+  caddy-config:
