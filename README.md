@@ -22,7 +22,7 @@ quebrava porque a porta 80 ficava ocupada (o cert do radar staging venceu em 23/
 2. Aqui: `conf/sites/meuapp.caddy` com `dominio.com { reverse_proxy meuapp:PORTA }` → push.
 
 ## Migração inicial a partir do radar_proxy (uma vez)
-Actions → **Deploy edge-proxy** → *Run workflow* com `cutover = true`. O workflow:
+Actions → **Deploy edge-proxy** → *Run workflow* (a caixa `cutover` já vem marcada). **Não use Re-run** de um run de push: ele repete os parâmetros do push (sem cutover). O workflow:
 1. valida a config e baixa a imagem (sem afetar nada);
 2. derruba a stack `radar-proxy` (libera 80/443) e sobe o Caddy;
 3. espera até 120 s por HTTPS **válido** (sem `-k`) em `CHECK_URLS`;

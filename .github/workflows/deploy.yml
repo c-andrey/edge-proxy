@@ -1,7 +1,7 @@
 name: Deploy edge-proxy
 
 # push na main → valida → rsync p/ /srv/edge-proxy → up -d + caddy reload (sem queda).
-# Run workflow com cutover=true → migração única a partir do radar_proxy, com rollback automático.
+# Run workflow (manual) → faz a migração única a partir do radar_proxy (caixa "cutover" já vem marcada), com rollback automático.
 # Secrets: VPS_HOST, VPS_USER, VPS_SSH_KEY, VPS_PORT (opcional). Environment: production.
 
 on:
@@ -11,9 +11,9 @@ on:
   workflow_dispatch:
     inputs:
       cutover:
-        description: "Migrar do radar_proxy (derruba radar-proxy e sobe o Caddy; rollback automático se falhar)"
+        description: "Migrar do radar_proxy se ele ainda estiver no ar (derruba radar-proxy e sobe o Caddy; rollback automático se falhar)"
         type: boolean
-        default: false
+        default: true   # rodar manualmente = intenção de migrar; após a migração vira só reload
 
 concurrency:
   group: deploy-edge-proxy
@@ -88,7 +88,8 @@ jobs:
           VPS_HOST: ${{ secrets.VPS_HOST }}
           VPS_USER: ${{ secrets.VPS_USER }}
           VPS_PORT: ${{ secrets.VPS_PORT }}
-          CUTOVER: ${{ inputs.cutover || false }}
+          # push → nunca faz cutover; Run workflow manual → conforme a caixa (marcada por padrão)
+          CUTOVER: ${{ github.event_name == 'workflow_dispatch' && inputs.cutover }}
         run: |
           ssh -p "${VPS_PORT:-22}" "$VPS_USER@$VPS_HOST" \
             "APP_DIR='$APP_DIR' CUTOVER='$CUTOVER' CHECK_URLS='$CHECK_URLS' RADAR_PROXY_COMPOSE='$RADAR_PROXY_COMPOSE' bash -s" <<'EOF'
@@ -121,6 +122,7 @@ jobs:
             exit 0
           fi
 
+          echo "==> CUTOVER solicitado: $CUTOVER"
           if docker ps --format '{{.Names}}' | grep -qx radar_proxy; then
             if [ "$CUTOVER" != "true" ]; then
               echo "::warning::radar_proxy ainda ocupa 80/443. Arquivos sincronizados; rode este workflow manualmente com cutover=true para migrar."
