@@ -80,7 +80,7 @@ jobs:
           ssh -p "${VPS_PORT:-22}" "$VPS_USER@$VPS_HOST" "mkdir -p '$APP_DIR'"
           rsync -az --delete --no-owner --no-group \
             -e "ssh -p ${VPS_PORT:-22} -o StrictHostKeyChecking=accept-new" \
-            --exclude '.git' --exclude '.github' \
+            --exclude '.git' --exclude '.github' --filter 'P deploy.log' \
             ./ "$VPS_USER@$VPS_HOST:$APP_DIR/"
 
       - name: Aplicar
@@ -95,12 +95,15 @@ jobs:
             "APP_DIR='$APP_DIR' CUTOVER='$CUTOVER' CHECK_URLS='$CHECK_URLS' RADAR_PROXY_COMPOSE='$RADAR_PROXY_COMPOSE' bash -s" <<'EOF'
           set -euo pipefail
           cd "$APP_DIR"
+          # tudo que este passo imprime também vai para a VPS (diagnóstico sem depender do GitHub)
+          exec > >(tee -a "$APP_DIR/deploy.log") 2>&1
+          echo "===== $(date -u +'%F %T') UTC — deploy (cutover=$CUTOVER)"
 
           check_urls() {   # TLS válido (sem -k) e resposta HTTP < 500 em todas as URLs
             for i in $(seq 1 24); do
               ok=1
               for u in $CHECK_URLS; do
-                code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "$u" || true)
+                code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "$u" </dev/null || true)
                 echo "  [$i] $u → $code"
                 case "$code" in 2*|3*|4*) ;; *) ok=0 ;; esac
               done
@@ -111,13 +114,15 @@ jobs:
           }
 
           echo "==> validando config"
-          docker compose pull -q
-          docker compose run --rm --no-deps --entrypoint caddy caddy validate --config /etc/caddy/Caddyfile
+          docker compose pull -q </dev/null
+          # -T e </dev/null: sem isso o `run` LÊ O STDIN — e o stdin aqui é o próprio script
+          # (bash -s <<EOF). Foi esse bug que fez os cutovers anteriores "passarem" sem fazer nada.
+          docker compose run -T --rm --no-deps --entrypoint caddy caddy validate --config /etc/caddy/Caddyfile </dev/null
 
           if docker ps --format '{{.Names}}' | grep -qx edge_caddy; then
             echo "==> edge_caddy no ar: aplicando sem queda"
-            docker compose up -d
-            docker compose exec -T caddy caddy reload --config /etc/caddy/Caddyfile
+            docker compose up -d </dev/null
+            docker compose exec -T caddy caddy reload --config /etc/caddy/Caddyfile </dev/null
             check_urls || { echo "::warning::alguma URL de CHECK_URLS não respondeu como esperado"; }
             exit 0
           fi
@@ -129,22 +134,22 @@ jobs:
               exit 0
             fi
             echo "==> CUTOVER: derrubando radar-proxy e subindo o Caddy"
-            docker compose -f "$RADAR_PROXY_COMPOSE" down
-            docker compose up -d
+            docker compose -f "$RADAR_PROXY_COMPOSE" down </dev/null
+            docker compose up -d </dev/null
             echo "==> aguardando certificados e respostas válidas (até 120 s)"
             if check_urls; then
               echo "==> cutover OK"
-              docker compose ps
+              docker compose ps </dev/null
               exit 0
             fi
             echo "::error::cutover falhou — ROLLBACK para o radar_proxy"
-            docker compose logs --tail 80 caddy || true
-            docker compose down
-            docker compose -f "$RADAR_PROXY_COMPOSE" up -d
+            docker compose logs --tail 80 caddy </dev/null || true
+            docker compose down </dev/null
+            docker compose -f "$RADAR_PROXY_COMPOSE" up -d </dev/null
             exit 1
           fi
 
           echo "==> nenhum proxy no ar: subindo o Caddy"
-          docker compose up -d
+          docker compose up -d </dev/null
           check_urls || echo "::warning::alguma URL de CHECK_URLS não respondeu como esperado"
           EOF

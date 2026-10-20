@@ -30,6 +30,15 @@ Actions → **Deploy edge-proxy** → *Run workflow* (a caixa `cutover` já vem 
 
 Enquanto o `radar_proxy` ocupar as portas, pushes normais só sincronizam os arquivos (aviso no log).
 
+**Migração feita em 2026-10-20 02:29 UTC** (executada com os comandos deste workflow, direto na VPS): o
+radar staging voltou a ter HTTPS válido (o cert antigo tinha vencido em 23/09) e o Gamedle ficou público em
+`http://187.77.254.161/gamedle/`. Os dois runs manuais anteriores não migraram por causa de um bug: o
+`docker compose run` lia o stdin, que era o próprio script (`bash -s <<EOF`), e "engolia" o resto. Corrigido
+com `run -T ... </dev/null`.
+
+## Diagnóstico
+Cada deploy grava a saída do passo "Aplicar" em `/srv/edge-proxy/deploy.log` (protegido do rsync).
+
 ## Secrets (mesmos dos outros repos da VPS)
 `VPS_HOST`, `VPS_USER`, `VPS_SSH_KEY`, `VPS_PORT` (opcional) + environment `production`.
 
