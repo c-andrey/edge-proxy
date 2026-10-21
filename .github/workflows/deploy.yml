@@ -124,11 +124,13 @@ jobs:
           # NÃO recriar o edge_caddy (o novo não subiria e derrubaria todos os sites): só reload.
           port_conflicts() {
             for p in $(docker compose config --format json </dev/null | python3 -c 'import json,sys; print(" ".join(sorted({str(pt["published"]) for pt in json.load(sys.stdin)["services"]["caddy"].get("ports", [])})))'); do
-              docker ps --format '{{.Names}} {{.Ports}}' | grep -v '^edge_caddy ' | grep -E "(0\.0\.0\.0|\[::\]):$p->" | awk -v p="$p" '{print p" (usada por "$1")"}'
+              docker ps --format '{{.Names}} {{.Ports}}' | grep -v '^edge_caddy ' | grep -E "(0\.0\.0\.0|\[::\]):$p->" | awk -v p="$p" '{print p" (usada por "$1")"}' || true
             done
           }
 
           if docker ps --format '{{.Names}}' | grep -qx edge_caddy; then
+            # `|| true` acima: sem conflito o grep sai com 1 e, com pipefail + set -e, o script morria
+            # calado aqui — os deploys de 21/10 sincronizaram os arquivos mas nunca deram reload.
             conflicts=$(port_conflicts)
             if [ -n "$conflicts" ]; then
               echo "::warning::porta(s) ocupada(s) por outro projeto: $conflicts — edge_caddy NÃO recriado; só recarregando a config."
