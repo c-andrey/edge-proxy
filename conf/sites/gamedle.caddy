@@ -1,15 +1,19 @@
-# Gamedle — endereço oficial https://gamedle.com.br (o app roda na raiz: BASE_PATH vazio).
-# Ligue renomeando para gamedle.caddy SÓ DEPOIS que o DNS (A → 187.77.254.161) de gamedle.com.br,
-# www.gamedle.com.br, gamedle.dev e www.gamedle.dev responder — senão o Caddy fica tentando emitir
-# certificado sem sucesso. Junto, desligue o ip-gamedle.caddy (o acesso por IP vira redirecionamento abaixo).
+# Gamedle — https://gamedle.com.br (pt) e https://gamedle.dev (en); o app roda na raiz (BASE_PATH vazio).
+# Ligado em 2026-10-21 (DNS A → 187.77.254.161 de gamedle.com.br, gamedle.dev e www). Substituiu o
+# antigo ip-gamedle.caddy: o acesso por IP virou o redirecionamento do fim deste arquivo.
 # O app entra na rede "edge" pelo compose.proxy.yaml do repo gamedle (alias "gamedle").
 
-# Variações → endereço oficial (301). O .dev só existe com HTTPS (HSTS preload do TLD); o Caddy emite.
-www.gamedle.com.br, gamedle.dev, www.gamedle.dev {
+# Um domínio por idioma: gamedle.com.br = português, gamedle.dev = inglês (o app decide pelo Host e
+# liga os dois com hreflang). www → o próprio domínio (301). O .dev só existe com HTTPS (HSTS preload do TLD).
+www.gamedle.com.br {
 	redir https://gamedle.com.br{uri} permanent
 }
 
-gamedle.com.br {
+www.gamedle.dev {
+	redir https://gamedle.dev{uri} permanent
+}
+
+gamedle.com.br, gamedle.dev {
 	encode zstd gzip
 	header {
 		Strict-Transport-Security "max-age=31536000; includeSubDomains"
