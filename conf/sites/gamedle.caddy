@@ -1,15 +1,20 @@
 # Gamedle — endereço oficial https://gamedle.com.br (o app roda na raiz: BASE_PATH vazio).
-# Ligue renomeando para gamedle.caddy SÓ DEPOIS que o DNS (A → 187.77.254.161) de gamedle.com.br,
-# www.gamedle.com.br, gamedle.dev e www.gamedle.dev responder — senão o Caddy fica tentando emitir
-# certificado sem sucesso. Junto, desligue o ip-gamedle.caddy (o acesso por IP vira redirecionamento abaixo).
+# Ligado em 2026-10-21 (DNS A → 187.77.254.161 de gamedle.com.br, gamedle.dev e www). Substitui o
+# antigo ip-gamedle.caddy: o acesso por IP virou o redirecionamento do fim deste arquivo.
 # O app entra na rede "edge" pelo compose.proxy.yaml do repo gamedle (alias "gamedle").
 
-# Variações → endereço oficial (301). O .dev só existe com HTTPS (HSTS preload do TLD); o Caddy emite.
-www.gamedle.com.br, gamedle.dev, www.gamedle.dev {
+# PROVISÓRIO (2026-10-21): o gamedle.com.br está "aguardando ativação" no registro.br, então o site sai
+# pelo gamedle.dev. Quando o .com.br resolver, reverter este commit: .dev volta a redirecionar (301).
+# Os blocos do .com.br já ficam aqui: o Caddy emite o certificado sozinho quando o DNS existir.
+www.gamedle.dev {
+	redir https://gamedle.dev{uri} permanent
+}
+
+www.gamedle.com.br {
 	redir https://gamedle.com.br{uri} permanent
 }
 
-gamedle.com.br {
+gamedle.com.br, gamedle.dev {
 	encode zstd gzip
 	header {
 		Strict-Transport-Security "max-age=31536000; includeSubDomains"
@@ -32,7 +37,7 @@ http://187.77.254.161 {
 		# route mantém a ordem escrita (sem ele o Caddy roda redir antes de uri e o /gamedle ficaria na URL)
 		route {
 			uri strip_prefix /gamedle
-			redir https://gamedle.com.br{uri} permanent
+			redir https://gamedle.dev{uri} temporary
 		}
 	}
 	handle {
